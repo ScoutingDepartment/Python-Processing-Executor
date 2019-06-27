@@ -1,26 +1,39 @@
 import javafx.beans.property.SimpleStringProperty
+import javafx.scene.control.TextArea
 import java.io.File
 import java.util.*
 import kotlin.concurrent.thread
 
-class PythonExecutor(file: File, private val env: String? = null) {
+class PythonExecutor(private val file: File, private val env: String? = null) {
     private val builder = ProcessBuilder()
-        .command("$env/venv/Scripts/python" ?: "python", "-u", file.absolutePath)
         .redirectErrorStream(true)
 
     val output = SimpleStringProperty()
+
     private lateinit var process: Process
     var done = false
 
+    private var dataPath: String? = null
+
     fun start() {
+        builder.command(env?.let { "$it/venv/Scripts/python" } ?: "python", "-u", file.absolutePath)
         process = builder.start()
         thread {
             val sc = Scanner(process.inputStream)
             while (sc.hasNextLine()) {
-                output.set(output.get() + sc.nextLine())
+                val nextLine = sc.nextLine()
+                if (nextLine.startsWith("!!")) {
+                    dataPath = nextLine.substring(2)
+                }
+                output.set(output.get() + nextLine)
             }
             done = true
         }
+    }
+
+    val ta get() = TextArea().apply {
+        isEditable = false
+        textProperty().bind(output)
     }
 
     fun getData(): String {
@@ -28,6 +41,8 @@ class PythonExecutor(file: File, private val env: String? = null) {
             return ""
         }
         val env = env ?: return ""
-        return File(env, "outQueue").listFiles()?.last()?.readText() ?: ""
+        return dataPath?.let {
+            File(it).readText()
+        } ?: File(env, "outQueue").listFiles()?.maxBy { it.lastModified() }?.readText() ?: ""
     }
 }
